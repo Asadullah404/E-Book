@@ -7,7 +7,7 @@ import {
     onAuthStateChanged
 } from 'firebase/auth';
 import { auth, googleProvider } from '@/lib/firebase';
-import { getUserRole, createOrUpdateUser } from '@/lib/firestoreService';
+import { getUserRole, createOrUpdateUser, upgradeUserRole } from '@/lib/firestoreService';
 
 // Create Auth Context
 const AuthContext = createContext({});
@@ -96,6 +96,19 @@ export const AuthProvider = ({ children }) => {
         }
     };
 
+    // Upgrade Account
+    const upgradeAccount = async (key) => {
+        const validKey = process.env.NEXT_PUBLIC_UPGRADE_KEY;
+        if (key === validKey) {
+            if (user) {
+                await upgradeUserRole(user.uid);
+                setUserRole('admin');
+                return true;
+            }
+        }
+        return false;
+    };
+
     const value = {
         user,
         userRole,
@@ -103,6 +116,7 @@ export const AuthProvider = ({ children }) => {
         signInWithGoogle,
         logout,
         isAdmin: userRole === 'admin',
+        upgradeAccount,
     };
 
     return (

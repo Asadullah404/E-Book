@@ -2,14 +2,14 @@
 
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Upload, Trash2, Plus, Book, FileText, ArrowLeft, ChevronRight } from 'lucide-react';
+import { X, Upload, Trash2, Plus, Book, FileText, ArrowLeft, ChevronRight, Type, Code, Bold, Italic, Heading1, Heading2, Palette } from 'lucide-react';
 import useStore from '@/store/useStore';
 import { useAuth } from '@/contexts/AuthContext';
 import { getBooks, addBook, deleteBook, addChapter, deleteChapter, getChaptersByBook } from '@/lib/firestoreService';
 
 export default function AddContentModal() {
     const { isAddContentModalOpen, toggleAddContentModal } = useStore();
-    const { isAdmin } = useAuth();
+    const { isAdmin, user } = useAuth();
 
     // View state: 'books' or 'chapters'
     const [view, setView] = useState('books');
@@ -25,6 +25,10 @@ export default function AddContentModal() {
     const [chapterTitle, setChapterTitle] = useState('');
     const [htmlContent, setHtmlContent] = useState('');
     const [fileName, setFileName] = useState('');
+
+    // Editor state
+    const [editorMode, setEditorMode] = useState('rich'); // 'rich' or 'html'
+    const [richTextContent, setRichTextContent] = useState('');
 
     // Fetch books when modal opens
     useEffect(() => {
@@ -61,6 +65,7 @@ export default function AddContentModal() {
             await addBook({
                 title: bookTitle,
                 order: Date.now(),
+                createdBy: user.uid, // Add ownership
             });
             setBookTitle('');
             await fetchBooks();
@@ -102,6 +107,7 @@ export default function AddContentModal() {
         setChapterTitle('');
         setHtmlContent('');
         setFileName('');
+        setRichTextContent('');
     };
 
     const handleFileUpload = (e) => {
@@ -121,9 +127,22 @@ export default function AddContentModal() {
             alert('Please enter a chapter title');
             return;
         }
-        if (!htmlContent.trim()) {
-            alert('Please upload HTML content');
-            return;
+
+        let finalContent = '';
+        if (editorMode === 'html') {
+            if (!htmlContent.trim()) {
+                alert('Please upload HTML content');
+                return;
+            }
+            finalContent = htmlContent;
+        } else {
+            if (!richTextContent.trim()) {
+                alert('Please enter some content');
+                return;
+            }
+            // Wrap rich text in a basic HTML structure if needed, or just save as is
+            // For this prototype, we'll save it wrapped in a div
+            finalContent = `<div class="rich-text-content">${richTextContent}</div>`;
         }
 
         try {
@@ -131,12 +150,14 @@ export default function AddContentModal() {
             await addChapter({
                 title: chapterTitle,
                 bookId: selectedBook.id,
-                content: htmlContent,
+                content: finalContent,
                 order: Date.now(),
+                createdBy: user.uid, // Add ownership
             });
             setChapterTitle('');
             setHtmlContent('');
             setFileName('');
+            setRichTextContent('');
             await fetchChapters(selectedBook.id);
             alert('Chapter added successfully!');
         } catch (error) {
@@ -219,6 +240,7 @@ export default function AddContentModal() {
                                     handleCreateBook={handleCreateBook}
                                     handleSelectBook={handleSelectBook}
                                     handleDeleteBook={handleDeleteBook}
+                                    currentUserUid={user?.uid}
                                 />
                             ) : (
                                 <ChaptersView
@@ -230,6 +252,11 @@ export default function AddContentModal() {
                                     handleFileUpload={handleFileUpload}
                                     handleAddChapter={handleAddChapter}
                                     handleDeleteChapter={handleDeleteChapter}
+                                    editorMode={editorMode}
+                                    setEditorMode={setEditorMode}
+                                    richTextContent={richTextContent}
+                                    setRichTextContent={setRichTextContent}
+                                    currentUserUid={user?.uid}
                                 />
                             )}
                         </div>
@@ -241,7 +268,7 @@ export default function AddContentModal() {
 }
 
 // Books View Component
-function BooksView({ books, loading, bookTitle, setBookTitle, handleCreateBook, handleSelectBook, handleDeleteBook }) {
+function BooksView({ books, loading, bookTitle, setBookTitle, handleCreateBook, handleSelectBook, handleDeleteBook, currentUserUid }) {
     return (
         <div className="space-y-6">
             {/* Create New Book */}
@@ -297,15 +324,17 @@ function BooksView({ books, loading, bookTitle, setBookTitle, handleCreateBook, 
                                     </div>
                                     <ChevronRight size={20} className="text-gray-400 group-hover:text-blue-500 transition-colors flex-shrink-0" />
                                 </div>
-                                <button
-                                    onClick={(e) => {
-                                        e.stopPropagation();
-                                        handleDeleteBook(book.id, book.title);
-                                    }}
-                                    className="absolute top-3 right-3 p-2 md:opacity-0 md:group-hover:opacity-100 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-all"
-                                >
-                                    <Trash2 size={16} className="text-red-500" />
-                                </button>
+                                {book.createdBy === currentUserUid && (
+                                    <button
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            handleDeleteBook(book.id, book.title);
+                                        }}
+                                        className="absolute top-3 right-3 p-2 md:opacity-0 md:group-hover:opacity-100 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-all"
+                                    >
+                                        <Trash2 size={16} className="text-red-500" />
+                                    </button>
+                                )}
                             </motion.div>
                         ))}
                     </div>
@@ -322,7 +351,11 @@ function BooksView({ books, loading, bookTitle, setBookTitle, handleCreateBook, 
 }
 
 // Chapters View Component
-function ChaptersView({ chapters, loading, chapterTitle, setChapterTitle, fileName, handleFileUpload, handleAddChapter, handleDeleteChapter }) {
+function ChaptersView({
+    chapters, loading, chapterTitle, setChapterTitle,
+    fileName, handleFileUpload, handleAddChapter, handleDeleteChapter,
+    editorMode, setEditorMode, richTextContent, setRichTextContent, currentUserUid
+}) {
     return (
         <div className="space-y-6">
             {/* Add New Chapter */}
@@ -330,7 +363,8 @@ function ChaptersView({ chapters, loading, chapterTitle, setChapterTitle, fileNa
                 <h3 className="font-semibold mb-4 flex items-center gap-2 text-gray-900 dark:text-white">
                     <Plus size={20} className="text-purple-600 dark:text-purple-400" /> Add New Chapter
                 </h3>
-                <div className="space-y-3">
+
+                <div className="space-y-4">
                     <input
                         type="text"
                         placeholder="Chapter title..."
@@ -338,16 +372,79 @@ function ChaptersView({ chapters, loading, chapterTitle, setChapterTitle, fileNa
                         onChange={(e) => setChapterTitle(e.target.value)}
                         className="w-full px-4 py-3 bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded-xl outline-none focus:border-purple-500 focus:ring-2 focus:ring-purple-500/20 text-gray-900 dark:text-white"
                     />
-                    <label className="block w-full cursor-pointer">
-                        <div className="border-2 border-dashed border-purple-300 dark:border-purple-800 bg-white dark:bg-gray-900 rounded-xl p-6 text-center hover:bg-purple-50 dark:hover:bg-purple-900/10 transition-colors">
-                            <Upload size={32} className="mx-auto text-purple-500 mb-2" />
-                            <p className="font-medium text-purple-600 dark:text-purple-400">
-                                {fileName || 'Click to upload HTML file'}
-                            </p>
-                            <p className="text-xs text-gray-500 mt-1">HTML files only</p>
+
+                    {/* Editor Mode Toggle */}
+                    <div className="flex bg-white dark:bg-gray-900 rounded-lg p-1 border border-gray-200 dark:border-gray-700 w-fit">
+                        <button
+                            onClick={() => setEditorMode('rich')}
+                            className={`px-4 py-2 rounded-md text-sm font-medium transition-all flex items-center gap-2 ${editorMode === 'rich'
+                                    ? 'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300'
+                                    : 'text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800'
+                                }`}
+                        >
+                            <Type size={16} /> Rich Text
+                        </button>
+                        <button
+                            onClick={() => setEditorMode('html')}
+                            className={`px-4 py-2 rounded-md text-sm font-medium transition-all flex items-center gap-2 ${editorMode === 'html'
+                                    ? 'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300'
+                                    : 'text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800'
+                                }`}
+                        >
+                            <Code size={16} /> HTML Upload
+                        </button>
+                    </div>
+
+                    {/* Editor Content */}
+                    {editorMode === 'rich' ? (
+                        <div className="space-y-2">
+                            {/* Simple Toolbar */}
+                            <div className="flex items-center gap-2 p-2 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-t-xl border-b-0">
+                                <button className="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 rounded text-gray-600 dark:text-gray-400" title="Bold" onClick={() => document.execCommand('bold', false, null)}>
+                                    <Bold size={18} />
+                                </button>
+                                <button className="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 rounded text-gray-600 dark:text-gray-400" title="Italic" onClick={() => document.execCommand('italic', false, null)}>
+                                    <Italic size={18} />
+                                </button>
+                                <div className="w-px h-4 bg-gray-300 dark:bg-gray-700 mx-1"></div>
+                                <button className="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 rounded text-gray-600 dark:text-gray-400" title="Heading 1" onClick={() => document.execCommand('formatBlock', false, '<h1>')}>
+                                    <Heading1 size={18} />
+                                </button>
+                                <button className="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 rounded text-gray-600 dark:text-gray-400" title="Heading 2" onClick={() => document.execCommand('formatBlock', false, '<h2>')}>
+                                    <Heading2 size={18} />
+                                </button>
+                                <div className="w-px h-4 bg-gray-300 dark:bg-gray-700 mx-1"></div>
+                                <button className="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 rounded text-gray-600 dark:text-gray-400" title="Text Color" onClick={() => document.execCommand('foreColor', false, '#ef4444')}>
+                                    <Palette size={18} className="text-red-500" />
+                                </button>
+                                <button className="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 rounded text-gray-600 dark:text-gray-400" title="Text Color" onClick={() => document.execCommand('foreColor', false, '#3b82f6')}>
+                                    <Palette size={18} className="text-blue-500" />
+                                </button>
+                            </div>
+
+                            {/* Editable Area */}
+                            <div
+                                contentEditable
+                                onInput={(e) => setRichTextContent(e.currentTarget.innerHTML)}
+                                className="w-full min-h-[200px] p-4 bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded-b-xl outline-none focus:border-purple-500 focus:ring-2 focus:ring-purple-500/20 text-gray-900 dark:text-white overflow-y-auto"
+                                style={{ maxHeight: '400px' }}
+                                placeholder="Start typing your content here..."
+                            />
+                            <p className="text-xs text-gray-500">Tip: You can paste content directly here.</p>
                         </div>
-                        <input type="file" className="hidden" accept=".html" onChange={handleFileUpload} />
-                    </label>
+                    ) : (
+                        <label className="block w-full cursor-pointer">
+                            <div className="border-2 border-dashed border-purple-300 dark:border-purple-800 bg-white dark:bg-gray-900 rounded-xl p-6 text-center hover:bg-purple-50 dark:hover:bg-purple-900/10 transition-colors">
+                                <Upload size={32} className="mx-auto text-purple-500 mb-2" />
+                                <p className="font-medium text-purple-600 dark:text-purple-400">
+                                    {fileName || 'Click to upload HTML file'}
+                                </p>
+                                <p className="text-xs text-gray-500 mt-1">HTML files only</p>
+                            </div>
+                            <input type="file" className="hidden" accept=".html" onChange={handleFileUpload} />
+                        </label>
+                    )}
+
                     <button
                         onClick={handleAddChapter}
                         disabled={loading}
@@ -386,12 +483,14 @@ function ChaptersView({ chapters, loading, chapterTitle, setChapterTitle, fileNa
                                         </p>
                                     </div>
                                 </div>
-                                <button
-                                    onClick={() => handleDeleteChapter(chapter.id, chapter.title)}
-                                    className="p-2 md:opacity-0 md:group-hover:opacity-100 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-all"
-                                >
-                                    <Trash2 size={18} className="text-red-500" />
-                                </button>
+                                {chapter.createdBy === currentUserUid && (
+                                    <button
+                                        onClick={() => handleDeleteChapter(chapter.id, chapter.title)}
+                                        className="p-2 md:opacity-0 md:group-hover:opacity-100 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-all"
+                                    >
+                                        <Trash2 size={18} className="text-red-500" />
+                                    </button>
+                                )}
                             </motion.div>
                         ))}
                     </div>

@@ -64,6 +64,22 @@ export const createOrUpdateUser = async (uid, userData) => {
     }
 };
 
+/**
+ * Upgrade user role to admin
+ * @param {string} uid - User ID
+ */
+export const upgradeUserRole = async (uid) => {
+    try {
+        const userRef = doc(db, 'users', uid);
+        await updateDoc(userRef, {
+            role: 'admin'
+        });
+    } catch (error) {
+        console.error('Error upgrading user role:', error);
+        throw error;
+    }
+};
+
 // ==================== BOOK OPERATIONS ====================
 
 /**
@@ -127,7 +143,14 @@ export const addBook = async (bookData) => {
  */
 export const deleteBook = async (bookId) => {
     try {
-        await deleteDoc(doc(db, 'books', bookId));
+        const bookRef = doc(db, 'books', bookId);
+        const bookSnap = await getDoc(bookRef);
+
+        if (bookSnap.exists()) {
+            // Optional: Check ownership if needed, but currently admin-only or owner-only logic is handled in UI/Rules
+            // For now, we just delete.
+            await deleteDoc(bookRef);
+        }
     } catch (error) {
         console.error('Error deleting book:', error);
         throw error;
